@@ -6,17 +6,30 @@ check-ins, commits and milestones build a verified track record.
 Built with **Next.js (App Router) + TypeScript + Tailwind CSS**, and **Supabase**
 for auth (GitHub OAuth) and the Postgres database.
 
-## What's inside
+## Routes
 
 - `/` — landing page with **Continue with GitHub** / **Log out** buttons.
-- `/dashboard` — protected page showing the signed-in user's name, GitHub
-  username, role, college and skills.
+- `/dashboard` — profile plus **My challenges** (your enrollments and statuses).
+- `/challenges` — grid of open challenges with a skill filter.
+- `/challenges/[id]` — problem statement, skills, dates and a **Join challenge**
+  button (shows **Joined** when you already enrolled).
+- `/admin/challenges` — every challenge with status and enrolled count.
+- `/admin/challenges/new` — create a challenge (existing or new company).
+- `/admin/challenges/[id]/edit` — edit the same fields.
 - `/auth/callback` — OAuth callback that exchanges the GitHub code for a session.
+
+Only `profiles.role = 'admin'` can open `/admin/*`; other signed-in users are
+redirected to `/dashboard`.
+
+Supporting files:
+
 - `lib/supabase/client.ts` — browser Supabase client.
 - `lib/supabase/server.ts` — server Supabase client (Server Components, Route
   Handlers, Server Actions).
+- `lib/auth.ts` — `requireUser`, `requireProfile` and `requireAdmin` guards.
 - `proxy.ts` — refreshes the Supabase session cookie on each request.
 - `supabase/migrations/` — schema, RLS policies and the first-login trigger.
+- `supabase/seed.sql` — sample company and challenges for testing the UI.
 
 ## 1. Create the Supabase project
 
@@ -30,9 +43,11 @@ Run the files in `supabase/migrations/` **in order** in the Supabase
 **SQL Editor**:
 
 1. `0001_init.sql` — tables and indexes.
-2. `0002_rls.sql` — row-level security and table privileges.
+2. `0002_rls.sql` — base row-level security and table privileges.
 3. `0003_new_user_profile.sql` — trigger that creates a `profiles` row on first
    login.
+4. `0004_challenge_rls.sql` — challenge discovery, admin-only authoring and
+   student enrollment rules.
 
 Or, with the Supabase CLI linked to your project:
 
@@ -83,6 +98,41 @@ npm run build
 npm run start
 ```
 
+## 6. Make yourself an admin
+
+Sign in once so your profile exists, then run this in the Supabase **SQL
+Editor** (service role):
+
+```sql
+update public.profiles
+set role = 'admin'
+where github_username = 'your-github-username';
+```
+
+Refresh the app: the **Admin** link appears in the navigation and
+`/admin/challenges` becomes available. This is also the only supported way to
+change a role — the API cannot update the `role` column.
+
+## 7. Seed sample data (optional)
+
+After you are an admin, paste `supabase/seed.sql` into the SQL Editor. It
+creates one company (**Lumen Labs**) owned by the first admin and three open
+challenges — **Backend Intern**, **ML Intern** and **Frontend Intern** — with
+dates relative to the day you run it.
+
+The seed uses fixed ids and `on conflict do nothing`, so it is safe to re-run.
+To remove the sample data later:
+
+```sql
+delete from public.challenges
+where id in (
+  '00000000-0000-4000-8000-000000000101',
+  '00000000-0000-4000-8000-000000000102',
+  '00000000-0000-4000-8000-000000000103'
+);
+delete from public.companies where id = '00000000-0000-4000-8000-000000000001';
+```
+
 ## Database
 
 | Table | Purpose |
@@ -98,19 +148,19 @@ npm run start
 
 ### Row-level security
 
-- **Students** can read and write only their own rows: their profile, their
-  enrollments and the check-ins, commits, milestones and scores attached to
-  those enrollments. Open challenges are readable so they can enroll.
-- **Admins** can read everything.
-- **Company owners** can manage their own company and its challenges.
-- Profile updates are column-limited so a student cannot promote themselves to
-  `admin`; role changes must go through the Supabase SQL editor / service role.
-
-Promote a user to admin (service role, e.g. SQL editor):
-
-```sql
-update public.profiles set role = 'admin' where github_username = 'their-handle';
-```
+- **Companies** are readable by any signed-in user (challenge cards show the
+  name). Only admins can insert, update or delete them.
+- **Challenges** are readable by any signed-in user when `status = 'open'`.
+  Students also keep reading challenges they are enrolled in, even after they
+  close. Only admins can insert, update or delete challenges.
+- **Enrollments** are visible to their student and to admins. A student can
+  insert only their own enrollment, only for an open challenge whose end date
+  has not passed, and `unique (challenge_id, student_id)` prevents duplicates.
+- **Profiles** are visible to their owner and admins; the `role` column cannot
+  be updated through the API (column-level privileges).
+- **Check-ins, commits, milestones and scores** follow their enrollment: the
+  owning student and admins can access them.
+- Unauthenticated requests have no table access.
 
 ### First login
 

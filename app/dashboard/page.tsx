@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { AppNav } from "@/components/app-nav";
 import { SignOutButton } from "@/components/sign-out-button";
+import { StatusBadge } from "@/components/status-badge";
 import { createClient } from "@/lib/supabase/server";
+import type { EnrollmentRow } from "@/lib/types";
 
 type Profile = {
   github_username: string | null;
@@ -47,6 +50,16 @@ async function Dashboard() {
 
   const profile = data as Profile | null;
 
+  const { data: enrollmentData } = await supabase
+    .from("enrollments")
+    .select(
+      "id, status, repo_url, created_at, challenges ( id, title, status, companies ( name ) )",
+    )
+    .eq("student_id", user.id)
+    .order("created_at", { ascending: false });
+
+  const enrollments = (enrollmentData ?? []) as unknown as EnrollmentRow[];
+
   // Fall back to GitHub metadata if the profile row has not been created yet.
   const fullName =
     profile?.full_name ??
@@ -62,6 +75,8 @@ async function Dashboard() {
 
   return (
     <div className="space-y-8">
+      <AppNav isAdmin={profile?.role === "admin"} />
+
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.25em] text-emerald-400">
@@ -124,6 +139,60 @@ async function Dashboard() {
           This profile was created automatically on your first GitHub login.
           Students can only see their own profile; admins can see everyone.
         </p>
+      </section>
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+            My challenges
+          </h2>
+          <Link
+            href="/challenges"
+            className="text-sm text-emerald-400 underline-offset-4 hover:underline"
+          >
+            Browse challenges →
+          </Link>
+        </div>
+
+        {enrollments.length === 0 ? (
+          <p className="mt-4 text-sm text-zinc-500">
+            You haven&apos;t joined any challenges yet.
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-zinc-800">
+            {enrollments.map((enrollment) => (
+              <li
+                key={enrollment.id}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <div className="min-w-0">
+                  {enrollment.challenges ? (
+                    <Link
+                      href={`/challenges/${enrollment.challenges.id}`}
+                      className="font-medium text-white underline-offset-4 hover:text-emerald-300 hover:underline"
+                    >
+                      {enrollment.challenges.title}
+                    </Link>
+                  ) : (
+                    <span className="text-sm text-zinc-400">
+                      Challenge unavailable
+                    </span>
+                  )}
+                  <p className="mt-0.5 text-xs text-zinc-500">
+                    {enrollment.challenges?.companies?.name ??
+                      "Unknown company"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {enrollment.challenges ? (
+                    <StatusBadge status={enrollment.challenges.status} />
+                  ) : null}
+                  <StatusBadge status={enrollment.status} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <Link
