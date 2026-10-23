@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { AdminTabs } from "@/components/admin-tabs";
 import { AppNav } from "@/components/app-nav";
 import { StatusBadge } from "@/components/status-badge";
 import { requireAdmin } from "@/lib/auth";
@@ -35,6 +36,7 @@ async function AdminChallenges() {
   return (
     <div className="space-y-8">
       <AppNav isAdmin />
+      <AdminTabs active="challenges" />
 
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>

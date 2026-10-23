@@ -59,6 +59,16 @@ async function ChallengeDetailView({
     challenge.status === "open" &&
     (!challenge.end_date || challenge.end_date >= today);
 
+  const studentSkills = new Set(
+    (profile.skills ?? []).map((skill) => skill.toLowerCase()),
+  );
+  const matchedSkills = challenge.required_skills.filter((skill) =>
+    studentSkills.has(skill.toLowerCase()),
+  );
+  const missingSkills = challenge.required_skills.filter(
+    (skill) => !studentSkills.has(skill.toLowerCase()),
+  );
+
   return (
     <div className="space-y-8">
       <AppNav isAdmin={profile.role === "admin"} />
@@ -115,6 +125,53 @@ async function ChallengeDetailView({
           <SkillTags skills={challenge.required_skills} />
         </div>
       </section>
+
+      {profile.role === "student" ? (
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+          <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+            Your skill match
+          </h2>
+
+          {challenge.required_skills.length === 0 ? (
+            <p className="mt-3 text-sm text-zinc-400">
+              This challenge lists no required skills.
+            </p>
+          ) : (
+            <>
+              <p className="mt-3 text-sm text-zinc-300">
+                You match{" "}
+                <span className="font-semibold text-emerald-300">
+                  {matchedSkills.length}
+                </span>{" "}
+                of {challenge.required_skills.length} required skills
+              </p>
+              <ul className="mt-3 flex flex-wrap gap-1.5">
+                {matchedSkills.map((skill) => (
+                  <li
+                    key={`matched-${skill}`}
+                    className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300"
+                  >
+                    {skill}
+                  </li>
+                ))}
+                {missingSkills.map((skill) => (
+                  <li
+                    key={`missing-${skill}`}
+                    className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-400"
+                  >
+                    {skill}
+                  </li>
+                ))}
+              </ul>
+              {missingSkills.length > 0 ? (
+                <p className="mt-3 text-xs text-zinc-500">
+                  Missing skills are gray — you can still join and learn them.
+                </p>
+              ) : null}
+            </>
+          )}
+        </section>
+      ) : null}
 
       <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
         <div>

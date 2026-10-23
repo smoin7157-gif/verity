@@ -16,6 +16,9 @@ export function AppNav({ isAdmin = false }: { isAdmin?: boolean }) {
         <Link href="/dashboard" className="transition-colors hover:text-white">
           Dashboard
         </Link>
+        <Link href="/profile" className="transition-colors hover:text-white">
+          Profile
+        </Link>
         {isAdmin ? (
           <Link
             href="/admin/challenges"

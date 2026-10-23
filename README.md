@@ -10,16 +10,21 @@ for auth (GitHub OAuth) and the Postgres database.
 
 - `/` — landing page with **Continue with GitHub** / **Log out** buttons.
 - `/dashboard` — profile plus **My challenges** (your enrollments and statuses).
+- `/onboarding` — required first-run student setup (name, college, branch, year,
+  phone, skills, LinkedIn and bio).
+- `/profile` — all profile details with an **Edit profile** mode.
 - `/challenges` — grid of open challenges with a skill filter.
-- `/challenges/[id]` — problem statement, skills, dates and a **Join challenge**
-  button (shows **Joined** when you already enrolled).
+- `/challenges/[id]` — problem statement, skills, dates, a skill match summary
+  and a **Join challenge** button (shows **Joined** when you already enrolled).
 - `/admin/challenges` — every challenge with status and enrolled count.
 - `/admin/challenges/new` — create a challenge (existing or new company).
 - `/admin/challenges/[id]/edit` — edit the same fields.
+- `/admin/students` — every student with college, year, skills and GitHub.
 - `/auth/callback` — OAuth callback that exchanges the GitHub code for a session.
 
 Only `profiles.role = 'admin'` can open `/admin/*`; other signed-in users are
-redirected to `/dashboard`.
+redirected to `/dashboard`. Students who have not finished onboarding are
+redirected to `/onboarding` from every protected route.
 
 Supporting files:
 
@@ -27,7 +32,10 @@ Supporting files:
 - `lib/supabase/server.ts` — server Supabase client (Server Components, Route
   Handlers, Server Actions).
 - `lib/auth.ts` — `requireUser`, `requireProfile` and `requireAdmin` guards.
-- `proxy.ts` — refreshes the Supabase session cookie on each request.
+- `lib/profile.ts` — zod schema and FormData parser shared by onboarding and
+  profile editing.
+- `proxy.ts` — refreshes the Supabase session cookie and enforces the student
+  onboarding gate on each request.
 - `supabase/migrations/` — schema, RLS policies and the first-login trigger.
 - `supabase/seed.sql` — sample company and challenges for testing the UI.
 
@@ -48,6 +56,8 @@ Run the files in `supabase/migrations/` **in order** in the Supabase
    login.
 4. `0004_challenge_rls.sql` — challenge discovery, admin-only authoring and
    student enrollment rules.
+5. `0005_profile_onboarding.sql` — onboarding columns, constraints and profile
+   column grants.
 
 Or, with the Supabase CLI linked to your project:
 
@@ -88,8 +98,9 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), click **Continue with
-GitHub**, and you will land on `/dashboard` with your name and GitHub username.
+Open [http://localhost:3000](http://localhost:3000) and click **Continue with
+GitHub**. New students land on `/onboarding` first; once they finish, they are
+sent to `/challenges`. Admins skip onboarding and land on `/dashboard`.
 
 Production build:
 
@@ -137,7 +148,7 @@ delete from public.companies where id = '00000000-0000-4000-8000-000000000001';
 
 | Table | Purpose |
 | --- | --- |
-| `profiles` | One row per auth user: GitHub username, name, college, skills, role |
+| `profiles` | One row per auth user: GitHub username, name, college, branch, year, phone, LinkedIn, bio, skills, role and onboarding status |
 | `companies` | Company profile owned by a user |
 | `challenges` | Challenge posted by a company (role, skills, dates, status) |
 | `enrollments` | A student's enrollment in a challenge (repo URL, status) |
@@ -156,11 +167,21 @@ delete from public.companies where id = '00000000-0000-4000-8000-000000000001';
 - **Enrollments** are visible to their student and to admins. A student can
   insert only their own enrollment, only for an open challenge whose end date
   has not passed, and `unique (challenge_id, student_id)` prevents duplicates.
-- **Profiles** are visible to their owner and admins; the `role` column cannot
-  be updated through the API (column-level privileges).
+- **Profiles** are visible to their owner and admins. Students can update only
+  their own profile (including onboarding fields); the `role` column cannot be
+  updated through the API (column-level privileges).
 - **Check-ins, commits, milestones and scores** follow their enrollment: the
   owning student and admins can access them.
 - Unauthenticated requests have no table access.
+
+### Onboarding
+
+`0005_profile_onboarding.sql` adds `phone`, `year_of_study`, `branch`,
+`linkedin_url`, `bio` (max 300 characters) and `onboarding_completed` to
+`profiles`. Every student starts with `onboarding_completed = false`, so the
+proxy redirects them to `/onboarding` until the form is submitted; admins skip
+the gate. The same form powers `/profile?edit=1`, and both paths validate with
+zod on the server before writing to Supabase.
 
 ### First login
 
@@ -171,7 +192,8 @@ runs at most once per user.
 
 ## Notes
 
-- No UI libraries or ORMs are used — just Next.js, Tailwind and Supabase.
+- No UI libraries or ORMs are used — just Next.js, Tailwind, Supabase and zod
+  for server-side validation.
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are safe to expose
   in the browser; access is enforced by row-level security.
 - The `.env.local` placeholder values let the app build; replace them with real

@@ -23,7 +23,9 @@ export async function requireProfile() {
 
   const { data } = await supabase
     .from("profiles")
-    .select("id, github_username, full_name, college, skills, role, created_at")
+    .select(
+      "id, github_username, full_name, college, skills, role, phone, year_of_study, branch, linkedin_url, bio, onboarding_completed, created_at",
+    )
     .eq("id", user.id)
     .maybeSingle();
 

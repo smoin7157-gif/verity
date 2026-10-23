@@ -9,6 +9,12 @@ export type Profile = {
   college: string | null;
   skills: string[] | null;
   role: Role;
+  phone: string | null;
+  year_of_study: number | null;
+  branch: string | null;
+  linkedin_url: string | null;
+  bio: string | null;
+  onboarding_completed: boolean;
   created_at: string;
 };
 
@@ -75,3 +81,19 @@ export type ChallengeAction = (
 ) => Promise<ChallengeFormState>;
 
 export type JoinState = { error: string | null };
+
+export type ProfileFormState = { error: string | null };
+export type ProfileAction = (
+  state: ProfileFormState,
+  formData: FormData,
+) => Promise<ProfileFormState>;
+
+export type StudentRow = {
+  id: string;
+  full_name: string | null;
+  github_username: string | null;
+  college: string | null;
+  branch: string | null;
+  year_of_study: number | null;
+  skills: string[] | null;
+};

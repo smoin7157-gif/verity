@@ -38,12 +38,54 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const pathname = request.nextUrl.pathname;
+
   // Gate the protected area before any HTML is streamed.
-  if (!user && request.nextUrl.pathname.startsWith("/dashboard")) {
-    const home = request.nextUrl.clone();
-    home.pathname = "/";
-    home.search = "";
-    return NextResponse.redirect(home);
+  if (!user) {
+    if (pathname.startsWith("/dashboard")) {
+      const home = request.nextUrl.clone();
+      home.pathname = "/";
+      home.search = "";
+      return NextResponse.redirect(home);
+    }
+
+    return response;
+  }
+
+  // Students must finish onboarding before using the app. Admins (and company
+  // accounts) skip it. This is the Next.js 16 equivalent of middleware.
+  const { data: profileData } = await supabase
+    .from("profiles")
+    .select("role, onboarding_completed")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const profile = profileData as {
+    role?: string;
+    onboarding_completed?: boolean;
+  } | null;
+
+  const needsOnboarding =
+    profile?.role === "student" && !profile.onboarding_completed;
+  const isOnboardingRoute = pathname === "/onboarding";
+  const isPublicRoute = pathname === "/" || pathname === "/auth/callback";
+
+  if (needsOnboarding && !isOnboardingRoute && !isPublicRoute) {
+    const onboarding = request.nextUrl.clone();
+    onboarding.pathname = "/onboarding";
+    onboarding.search = "";
+    return NextResponse.redirect(onboarding);
+  }
+
+  if (
+    isOnboardingRoute &&
+    profile &&
+    (profile.role !== "student" || profile.onboarding_completed)
+  ) {
+    const challenges = request.nextUrl.clone();
+    challenges.pathname = "/challenges";
+    challenges.search = "";
+    return NextResponse.redirect(challenges);
   }
 
   return response;
