@@ -113,6 +113,38 @@ export type CommitRow = {
 
 export type CommitStats = { total: number; active_days: number };
 
+export type CheckinRow = {
+  id: string;
+  date: string;
+  did: string | null;
+  blocked: string | null;
+  next: string | null;
+  created_at: string;
+};
+
+export type CheckinFormState = { error: string | null; success: string | null };
+
+export type AdminChallengeEnrollment = {
+  id: string;
+  status: EnrollmentStatus;
+  student_id: string;
+  profiles: {
+    full_name: string | null;
+    github_username: string | null;
+  } | null;
+};
+
+export type AdminChallengeDetail = {
+  id: string;
+  title: string;
+  role: string;
+  status: ChallengeStatus;
+  start_date: string | null;
+  end_date: string | null;
+  companies: CompanyRef;
+  enrollments: AdminChallengeEnrollment[] | null;
+};
+
 export type RepoFormState = { error: string | null; success: string | null };
 export type SyncState = { error: string | null; success: string | null };
 

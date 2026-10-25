@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { todayInKolkata } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import type { JoinState } from "@/lib/types";
 
@@ -47,7 +48,7 @@ export async function joinChallenge(
     return { error: "This challenge is not open for enrollment." };
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInKolkata();
   if (challenge.end_date && challenge.end_date < today) {
     return { error: "This challenge has already ended." };
   }

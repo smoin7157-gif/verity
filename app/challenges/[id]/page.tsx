@@ -6,6 +6,7 @@ import { JoinButton } from "@/components/join-button";
 import { SkillTags } from "@/components/skill-tags";
 import { StatusBadge } from "@/components/status-badge";
 import { requireProfile } from "@/lib/auth";
+import { todayInKolkata } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
 import type { ChallengeDetail } from "@/lib/types";
 
@@ -54,7 +55,7 @@ async function ChallengeDetailView({
     .maybeSingle();
 
   const joined = Boolean(enrollmentData);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInKolkata();
   const isOpen =
     challenge.status === "open" &&
     (!challenge.end_date || challenge.end_date >= today);

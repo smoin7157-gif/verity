@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireProfile } from "@/lib/auth";
+import { checkinClosedMessage, parseCheckinForm } from "@/lib/checkins";
+import { todayInKolkata } from "@/lib/dates";
 import {
   GitHubError,
   fetchRepo,
@@ -10,7 +12,11 @@ import {
   parseRepoUrl,
 } from "@/lib/github";
 import { syncCooldownRemainingMs, syncEnrollment } from "@/lib/github-sync";
-import type { RepoFormState, SyncState } from "@/lib/types";
+import type {
+  CheckinFormState,
+  RepoFormState,
+  SyncState,
+} from "@/lib/types";
 
 function describe(error: unknown): string {
   if (error instanceof GitHubError) return error.message;
@@ -195,4 +201,80 @@ export async function syncNow(
         ? "Already up to date — no new commits."
         : `Synced ${result.added} new commit${result.added === 1 ? "" : "s"} (${result.total} total).`,
   };
+}
+
+/**
+ * Creates or updates today's check-in (Asia/Kolkata). The unique constraint on
+ * (enrollment_id, date) plus the RLS policies keep one row per day.
+ */
+export async function saveCheckin(
+  _previousState: CheckinFormState,
+  formData: FormData,
+): Promise<CheckinFormState> {
+  const challengeId = String(formData.get("challenge_id") ?? "").trim();
+  if (!challengeId) return { error: "Missing challenge.", success: null };
+
+  const parsed = parseCheckinForm(formData);
+  if (!parsed.success) return { error: parsed.error, success: null };
+
+  const { supabase, user, profile } = await requireProfile();
+
+  if (profile.role !== "student") {
+    return { error: "Only students can check in.", success: null };
+  }
+
+  const { data, error } = await supabase
+    .from("enrollments")
+    .select("id, challenges ( start_date, end_date )")
+    .eq("challenge_id", challengeId)
+    .eq("student_id", user.id)
+    .maybeSingle();
+
+  const enrollment = data as {
+    id: string;
+    challenges: { start_date: string | null; end_date: string | null } | null;
+  } | null;
+
+  if (error || !enrollment) {
+    return {
+      error: "Join this challenge before checking in.",
+      success: null,
+    };
+  }
+
+  const closed = checkinClosedMessage(
+    enrollment.challenges?.start_date,
+    enrollment.challenges?.end_date,
+  );
+  if (closed) return { error: closed, success: null };
+
+  const { error: saveError } = await supabase.from("checkins").upsert(
+    {
+      enrollment_id: enrollment.id,
+      date: todayInKolkata(),
+      did: parsed.data.did,
+      blocked: parsed.data.blocked,
+      next: parsed.data.next,
+    },
+    { onConflict: "enrollment_id,date" },
+  );
+
+  if (saveError) {
+    if (saveError.code === "23514") {
+      return {
+        error: "Describe what you did in at least 10 characters.",
+        success: null,
+      };
+    }
+
+    return {
+      error: "Could not save your check-in. Only today's check-in can be edited.",
+      success: null,
+    };
+  }
+
+  revalidatePath(`/challenges/${challengeId}/workspace`);
+  revalidatePath("/dashboard");
+
+  return { error: null, success: "Check-in saved for today." };
 }

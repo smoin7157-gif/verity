@@ -91,6 +91,12 @@ async function AdminChallenges() {
                 </span>
                 <StatusBadge status={row.status} />
                 <Link
+                  href={`/admin/challenges/${row.id}`}
+                  className="text-sm text-zinc-300 underline-offset-4 hover:text-emerald-400 hover:underline"
+                >
+                  View
+                </Link>
+                <Link
                   href={`/admin/challenges/${row.id}/edit`}
                   className="text-sm text-emerald-400 underline-offset-4 hover:underline"
                 >

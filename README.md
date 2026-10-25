@@ -16,10 +16,13 @@ for auth (GitHub OAuth) and the Postgres database.
 - `/challenges` — grid of open challenges with a skill filter.
 - `/challenges/[id]` — problem statement, skills, dates, a skill match summary
   and a **Join challenge** button (shows **Joined** when you already enrolled).
-- `/challenges/[id]/workspace` — enrolled students only: link a public GitHub
-  repo, run a sync, and see commit stats plus the 20 most recent commits.
+- `/challenges/[id]/workspace` — enrolled students only: daily check-in, streak
+  card, last 7 check-ins, repo linking, commit sync and the 20 most recent
+  commits.
 - `/admin/challenges` — every challenge with status and enrolled count.
 - `/admin/challenges/new` — create a challenge (existing or new company).
+- `/admin/challenges/[id]` — challenge overview with every enrolled student's
+  current streak, total check-ins and total commits.
 - `/admin/challenges/[id]/edit` — edit the same fields.
 - `/admin/students` — every student with college, year, skills and GitHub.
 - `/auth/callback` — OAuth callback that exchanges the GitHub code for a session.
@@ -36,6 +39,11 @@ Supporting files:
 - `lib/auth.ts` — `requireUser`, `requireProfile` and `requireAdmin` guards.
 - `lib/profile.ts` — zod schema and FormData parser shared by onboarding and
   profile editing.
+- `lib/dates.ts` — the app's only "today" helper: `todayInKolkata()`, date
+  arithmetic and challenge check-in windows (Asia/Kolkata, not UTC).
+- `lib/checkins.ts` — zod schema and FormData parser for daily check-ins.
+- `lib/streaks.ts` — current streak, longest streak, totals, check-in rate and
+  the combined summary used by the workspace and admin tables.
 - `lib/github.ts` — fetch-based GitHub client: repo URL parsing, repo and
   contributor checks, paginated commit collection.
 - `lib/github-sync.ts` — `syncEnrollment`, `syncAllEnrollments` and the manual
@@ -69,6 +77,8 @@ Run the files in `supabase/migrations/` **in order** in the Supabase
    column grants.
 6. `0006_github_sync.sql` — commit sync columns, enrollment sync bookkeeping,
    commit read-only RLS, `repo_url` grant and the `commit_stats` helper.
+7. `0007_checkins_streaks.sql` — `kolkata_today()` helper, `did` length check
+   and today-only check-in RLS.
 
 Or, with the Supabase CLI linked to your project:
 
@@ -211,6 +221,35 @@ curl -H "x-cron-secret: $CRON_SECRET" http://localhost:3000/api/cron/sync
 
 The response is `{ total, synced, failed, errors }`.
 
+## 9. Daily check-ins and streaks
+
+Each enrolled student writes one check-in per day from
+`/challenges/[id]/workspace`: what they did (required, at least 10 characters),
+what blocked them (optional) and what is next (required). If today's check-in
+already exists the same form opens prefilled and saves an update instead of a
+second row. The unique constraint on `(enrollment_id, date)` enforces one row per
+day.
+
+- **"Today" is Asia/Kolkata.** `lib/dates.ts` is the single source of truth for
+  the UI/server code, and `public.kolkata_today()` does the same in Postgres RLS.
+  Do not use `new Date().toISOString().slice(0, 10)` for calendar dates.
+- Check-ins are accepted only between the challenge `start_date` and `end_date`
+  (inclusive). Before or after that window the workspace explains why the form is
+  closed.
+- A **current streak** counts consecutive check-in days ending today — or
+  yesterday, so it does not drop to 0 before the student checks in today.
+- **Longest streak** is the longest consecutive run in the enrollment's history.
+- **Check-in rate** is total check-ins divided by challenge days elapsed (start
+  day through today, capped at `end_date`). It shows `—` before the challenge
+  starts.
+
+The workspace shows the streak card plus the last 7 check-ins. `/admin/challenges/[id]`
+shows each enrolled student's current streak, total check-ins and total commits.
+
+RLS (`0007_checkins_streaks.sql`): students can read, insert and update only
+their own check-ins, and only when `date = kolkata_today()`. Admins read every
+check-in. Deletes are not granted to the API.
+
 ## Database
 
 | Table | Purpose |
@@ -219,7 +258,7 @@ The response is `{ total, synced, failed, errors }`.
 | `companies` | Company profile owned by a user |
 | `challenges` | Challenge posted by a company (role, skills, dates, status) |
 | `enrollments` | A student's enrollment in a challenge (repo URL, status) |
-| `checkins` | Daily did / blocked / next updates per enrollment |
+| `checkins` | Daily did / blocked / next update per enrollment, one per date |
 | `commits` | Commits synced per enrollment: SHA, message, author, dates, diff stats and GitHub URL |
 | `milestones` | Weekly deploy URL and note per enrollment |
 | `scores` | Consistency, project quality, demo and computed total per enrollment |
@@ -237,8 +276,11 @@ The response is `{ total, synced, failed, errors }`.
 - **Profiles** are visible to their owner and admins. Students can update only
   their own profile (including onboarding fields); the `role` column cannot be
   updated through the API (column-level privileges).
-- **Check-ins, commits, milestones and scores** follow their enrollment: the
-  owning student and admins can access them.
+- **Check-ins** follow their enrollment: the owning student can read, insert
+  and update only today's row (Asia/Kolkata); admins can read all. There is no
+  delete through the API, and `did` must be at least 10 characters.
+- **Milestones and scores** follow their enrollment: the owning student and
+  admins can access them.
 - **Commits** are read-only through the API for the owning student and admins.
   Only the service-role sync code writes them (`lib/github-sync.ts`).
 - Students may update `repo_url` on their own enrollment, and only while

@@ -2,13 +2,18 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { AppNav } from "@/components/app-nav";
+import { CheckinForm } from "@/components/checkin-form";
 import { RepoForm } from "@/components/repo-form";
 import { StatusBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
 import { requireProfile } from "@/lib/auth";
-import { formatDateRange, formatDateTime } from "@/lib/format";
+import { checkinClosedMessage } from "@/lib/checkins";
+import { todayInKolkata } from "@/lib/dates";
+import { formatDate, formatDateRange, formatDateTime } from "@/lib/format";
 import { syncCooldownRemainingMs } from "@/lib/github-sync";
+import { checkinSummary } from "@/lib/streaks";
 import type {
+  CheckinRow,
   CommitRow,
   CommitStats,
   WorkspaceEnrollment,
@@ -54,7 +59,7 @@ async function Workspace({ params }: { params: Promise<{ id: string }> }) {
   const challenge = enrollment.challenges;
   if (!challenge) notFound();
 
-  const [statsResult, commitsResult] = await Promise.all([
+  const [statsResult, commitsResult, checkinsResult] = await Promise.all([
     supabase.rpc("commit_stats", { target_enrollment: enrollment.id }),
     supabase
       .from("commits")
@@ -64,6 +69,11 @@ async function Workspace({ params }: { params: Promise<{ id: string }> }) {
       .eq("enrollment_id", enrollment.id)
       .order("committed_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("checkins")
+      .select("id, date, did, blocked, next, created_at")
+      .eq("enrollment_id", enrollment.id)
+      .order("date", { ascending: false }),
   ]);
 
   const stats =
@@ -72,6 +82,21 @@ async function Workspace({ params }: { params: Promise<{ id: string }> }) {
       active_days: 0,
     };
   const commits = (commitsResult.data ?? []) as unknown as CommitRow[];
+  const checkins = (checkinsResult.data ?? []) as unknown as CheckinRow[];
+
+  const today = todayInKolkata();
+  const todayCheckin = checkins.find((row) => row.date === today) ?? null;
+  const summary = checkinSummary(
+    checkins.map((row) => row.date),
+    challenge.start_date,
+    challenge.end_date,
+    today,
+  );
+  const checkinClosed = checkinClosedMessage(
+    challenge.start_date,
+    challenge.end_date,
+    today,
+  );
 
   const cooldownRemainingMs = syncCooldownRemainingMs(
     enrollment.last_sync_attempt_at,
@@ -145,6 +170,141 @@ async function Workspace({ params }: { params: Promise<{ id: string }> }) {
           </p>
         </div>
       ) : null}
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+            Daily check-in
+          </h2>
+          <span className="text-xs text-zinc-500">
+            {formatDate(today)} · Asia/Kolkata
+          </span>
+        </div>
+
+        {checkinClosed ? (
+          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+            <p className="text-sm text-zinc-300">{checkinClosed}</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              Check-ins are open between the challenge start and end dates.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">
+              {todayCheckin
+                ? "You already checked in today. Saving updates today's entry."
+                : "One check-in per day. Keep it honest and concrete."}
+            </p>
+            <CheckinForm
+              challengeId={challenge.id}
+              editing={Boolean(todayCheckin)}
+              defaults={
+                todayCheckin
+                  ? {
+                      did: todayCheckin.did ?? "",
+                      blocked: todayCheckin.blocked ?? "",
+                      next: todayCheckin.next ?? "",
+                    }
+                  : undefined
+              }
+            />
+          </>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+          Check-in streak
+        </h2>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+            <p className="text-xs text-zinc-500">Current streak</p>
+            <p className="mt-1 text-2xl font-semibold text-emerald-300">
+              {summary.current}
+            </p>
+            <p className="text-xs text-zinc-500">
+              day{summary.current === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+            <p className="text-xs text-zinc-500">Longest streak</p>
+            <p className="mt-1 text-2xl font-semibold text-white">
+              {summary.longest}
+            </p>
+            <p className="text-xs text-zinc-500">
+              day{summary.longest === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+            <p className="text-xs text-zinc-500">Total check-ins</p>
+            <p className="mt-1 text-2xl font-semibold text-white">
+              {summary.total}
+            </p>
+            <p className="text-xs text-zinc-500">
+              {summary.elapsedDays > 0
+                ? `of ${summary.elapsedDays} challenge day${summary.elapsedDays === 1 ? "" : "s"}`
+                : "Challenge not started"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+            <p className="text-xs text-zinc-500">Check-in rate</p>
+            <p className="mt-1 text-2xl font-semibold text-white">
+              {summary.elapsedDays > 0
+                ? `${Math.round(summary.rate * 100)}%`
+                : "—"}
+            </p>
+            <p className="text-xs text-zinc-500">days elapsed</p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+            Last 7 check-ins
+          </h3>
+          {summary.total > checkins.slice(0, 7).length ? (
+            <span className="text-xs text-zinc-500">
+              Showing {checkins.slice(0, 7).length} of {summary.total}
+            </span>
+          ) : null}
+        </div>
+
+        {checkins.length === 0 ? (
+          <p className="mt-3 text-sm text-zinc-500">
+            No check-ins yet. Write today&apos;s update above to start your streak.
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-zinc-800">
+            {checkins.slice(0, 7).map((checkin) => (
+              <li key={checkin.id} className="py-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-white">
+                    {formatDate(checkin.date)}
+                  </p>
+                  {checkin.date === today ? (
+                    <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-xs text-emerald-300">
+                      Today
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 whitespace-pre-line text-sm leading-6 text-zinc-300">
+                  {checkin.did ?? "No update recorded."}
+                </p>
+                {checkin.blocked ? (
+                  <p className="mt-1 text-xs leading-5 text-amber-300/80">
+                    Blocked: {checkin.blocked}
+                  </p>
+                ) : null}
+                {checkin.next ? (
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">
+                    Next: {checkin.next}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
         <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
