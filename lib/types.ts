@@ -82,6 +82,40 @@ export type ChallengeAction = (
 
 export type JoinState = { error: string | null };
 
+export type WorkspaceEnrollment = {
+  id: string;
+  repo_url: string | null;
+  last_synced_at: string | null;
+  last_sync_attempt_at: string | null;
+  sync_error: string | null;
+  challenges: {
+    id: string;
+    title: string;
+    role: string;
+    status: ChallengeStatus;
+    start_date: string | null;
+    end_date: string | null;
+    companies: CompanyRef;
+  } | null;
+};
+
+export type CommitRow = {
+  sha: string;
+  message: string | null;
+  author_login: string | null;
+  author_date: string | null;
+  committer_date: string | null;
+  url: string | null;
+  additions: number;
+  deletions: number;
+  committed_at: string;
+};
+
+export type CommitStats = { total: number; active_days: number };
+
+export type RepoFormState = { error: string | null; success: string | null };
+export type SyncState = { error: string | null; success: string | null };
+
 export type ProfileFormState = { error: string | null };
 export type ProfileAction = (
   state: ProfileFormState,

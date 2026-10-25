@@ -180,7 +180,7 @@ async function ChallengeDetailView({
           </h2>
           <p className="mt-1 text-sm text-zinc-400">
             {joined
-              ? "Your enrollment is active. Track it from your dashboard."
+              ? "Your enrollment is active — open the workspace to link your repo and sync commits."
               : isOpen
                 ? "Join to log daily check-ins, commits and milestones."
                 : "This challenge is not accepting new students right now."}
@@ -188,9 +188,19 @@ async function ChallengeDetailView({
         </div>
 
         {joined ? (
-          <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-300">
-            Joined
-          </span>
+          <div className="flex flex-col items-end gap-2">
+            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-300">
+              Joined
+            </span>
+            {profile.role === "student" ? (
+              <Link
+                href={`/challenges/${challenge.id}/workspace`}
+                className="text-sm text-emerald-400 underline-offset-4 hover:underline"
+              >
+                Open workspace →
+              </Link>
+            ) : null}
+          </div>
         ) : profile.role === "student" && isOpen ? (
           <JoinButton challengeId={challenge.id} />
         ) : (

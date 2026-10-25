@@ -12,6 +12,20 @@ export function formatDate(value: string | null | undefined): string {
   });
 }
 
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "Never";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function formatDateRange(
   start: string | null | undefined,
   end: string | null | undefined,

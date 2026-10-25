@@ -16,6 +16,8 @@ for auth (GitHub OAuth) and the Postgres database.
 - `/challenges` — grid of open challenges with a skill filter.
 - `/challenges/[id]` — problem statement, skills, dates, a skill match summary
   and a **Join challenge** button (shows **Joined** when you already enrolled).
+- `/challenges/[id]/workspace` — enrolled students only: link a public GitHub
+  repo, run a sync, and see commit stats plus the 20 most recent commits.
 - `/admin/challenges` — every challenge with status and enrolled count.
 - `/admin/challenges/new` — create a challenge (existing or new company).
 - `/admin/challenges/[id]/edit` — edit the same fields.
@@ -34,8 +36,15 @@ Supporting files:
 - `lib/auth.ts` — `requireUser`, `requireProfile` and `requireAdmin` guards.
 - `lib/profile.ts` — zod schema and FormData parser shared by onboarding and
   profile editing.
+- `lib/github.ts` — fetch-based GitHub client: repo URL parsing, repo and
+  contributor checks, paginated commit collection.
+- `lib/github-sync.ts` — `syncEnrollment`, `syncAllEnrollments` and the manual
+  sync cooldown.
+- `lib/supabase/admin.ts` — service-role client used only by the sync to write
+  commits (never import it in the browser).
 - `proxy.ts` — refreshes the Supabase session cookie and enforces the student
   onboarding gate on each request.
+- `vercel.json` — Vercel Cron schedule for `/api/cron/sync`.
 - `supabase/migrations/` — schema, RLS policies and the first-login trigger.
 - `supabase/seed.sql` — sample company and challenges for testing the UI.
 
@@ -58,6 +67,8 @@ Run the files in `supabase/migrations/` **in order** in the Supabase
    student enrollment rules.
 5. `0005_profile_onboarding.sql` — onboarding columns, constraints and profile
    column grants.
+6. `0006_github_sync.sql` — commit sync columns, enrollment sync bookkeeping,
+   commit read-only RLS, `repo_url` grant and the `commit_stats` helper.
 
 Or, with the Supabase CLI linked to your project:
 
@@ -85,11 +96,23 @@ Create `.env.local` in the project root (see `.env.example`):
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API → Project URL | yes |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API → anon / public key | yes |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → `service_role` secret | yes (commit sync) |
+| `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens | yes (repo linking + sync) |
+| `CRON_SECRET` | Generate your own, e.g. `openssl rand -hex 32` | yes (cron) |
+
+The last three are **server-only**. `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS and
+`GITHUB_TOKEN` is a personal token — never prefix them with `NEXT_PUBLIC_` and
+never import `lib/supabase/admin.ts` from a Client Component.
 
 ```bash
 cp .env.example .env.local
 # then paste your project values into .env.local
 ```
+
+The GitHub token only needs read access to public repositories: a fine-grained
+token with **Public repositories (read-only)**, or a classic token with no
+scopes. Repo linking and sync return a configuration error when it is missing.
+Unauthenticated GitHub API calls would be limited to 60 per hour.
 
 ## 5. Run it
 
@@ -144,6 +167,50 @@ where id in (
 delete from public.companies where id = '00000000-0000-4000-8000-000000000001';
 ```
 
+## 8. GitHub repo linking and commit sync
+
+Enrolled students open `/challenges/[id]/workspace` and submit a public repo
+URL. Before saving, the server checks with the GitHub API that:
+
+- the URL is `https://github.com/<owner>/<repo>`;
+- the repo exists and is public (`GET /repos/{owner}/{repo}` returns
+  `private: false`);
+- the repo owner is the student's `github_username`, or GitHub lists the student
+  as a contributor.
+
+The URL can be changed until the first successful sync; afterwards
+`enrollments.last_synced_at` is set and the link is locked.
+
+A sync fetches commits since the challenge start date (paginated, 100 per page),
+keeps only commits whose author login matches the student, and fetches diff
+stats from the single-commit endpoint **only for commits not stored yet**.
+Rows are upserted on `(enrollment_id, sha)`, so running a sync twice never
+creates duplicates. Rate limits, missing tokens, deleted repos and other GitHub
+errors are stored in `enrollments.sync_error` and shown on the workspace page.
+
+- **Sync now** is limited to once every 10 minutes per enrollment
+  (`last_sync_attempt_at`).
+- The cron job syncs every active enrollment with a `repo_url`.
+
+### Cron
+
+`vercel.json` runs `/api/cron/sync` every 6 hours:
+
+```json
+{ "crons": [{ "path": "/api/cron/sync", "schedule": "0 */6 * * *" }] }
+```
+
+Set `CRON_SECRET` in your Vercel environment variables. Vercel Cron sends it
+automatically as `Authorization: Bearer <secret>`. Vercel's Hobby plan only
+allows daily cron jobs — use `0 0 * * *` there, or call the endpoint from an
+external scheduler. To run it manually:
+
+```bash
+curl -H "x-cron-secret: $CRON_SECRET" http://localhost:3000/api/cron/sync
+```
+
+The response is `{ total, synced, failed, errors }`.
+
 ## Database
 
 | Table | Purpose |
@@ -153,7 +220,7 @@ delete from public.companies where id = '00000000-0000-4000-8000-000000000001';
 | `challenges` | Challenge posted by a company (role, skills, dates, status) |
 | `enrollments` | A student's enrollment in a challenge (repo URL, status) |
 | `checkins` | Daily did / blocked / next updates per enrollment |
-| `commits` | Commits synced per enrollment |
+| `commits` | Commits synced per enrollment: SHA, message, author, dates, diff stats and GitHub URL |
 | `milestones` | Weekly deploy URL and note per enrollment |
 | `scores` | Consistency, project quality, demo and computed total per enrollment |
 
@@ -172,6 +239,10 @@ delete from public.companies where id = '00000000-0000-4000-8000-000000000001';
   updated through the API (column-level privileges).
 - **Check-ins, commits, milestones and scores** follow their enrollment: the
   owning student and admins can access them.
+- **Commits** are read-only through the API for the owning student and admins.
+  Only the service-role sync code writes them (`lib/github-sync.ts`).
+- Students may update `repo_url` on their own enrollment, and only while
+  `last_synced_at` is null.
 - Unauthenticated requests have no table access.
 
 ### Onboarding
